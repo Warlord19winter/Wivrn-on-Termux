@@ -9,6 +9,29 @@ Built and tested on a Snapdragon 8 Gen 3 phone (Adreno 750, Turnip Vulkan)
 with a Quest 3S as the client. A Snapdragon 8 Gen 2 (Adreno 740) works the
 same way.
 
+## Contents
+
+**Before you start**
+- [What this is not](#what-this-is-not)
+- [What you need](#what-you-need)
+- [Match the client version first](#match-the-client-version-first)
+
+**Building the server**
+- [Step 1 - Termux packages](#step-1---termux-packages)
+- [Step 2 - Helper files](#step-2---helper-files)
+- [Step 3 - libudev-zero](#step-3---libudev-zero)
+- [Step 4 - Get the WiVRn source](#step-4---get-the-wivrn-source)
+- [Step 5 - Configure](#step-5---configure)
+- [Step 6 - Build](#step-6---build)
+
+**Running it**
+- [Step 7 - Runtime setup](#step-7---runtime-setup)
+- [Step 8 - Run it](#step-8---run-it)
+
+**Reference**
+- [Troubleshooting](#troubleshooting)
+- [Credits](#credits)
+
 ## What this is not
 
 This is not a prebuilt APK. WiVRn's server is meant for desktop Linux, so
@@ -16,6 +39,8 @@ getting it onto Termux means building it from source and working around the
 places where Android's Bionic libc and Termux's toolchain differ from a
 normal Linux box. It is involved. If you just want VR streaming and own a PC,
 run the normal desktop WiVRn server instead.
+
+→ Next: [What you need](#what-you-need) · [↑ Contents](#contents)
 
 ## What you need
 
@@ -28,6 +53,8 @@ run the normal desktop WiVRn server instead.
 - A headset with the WiVRn client installed (Quest, Pico, and so on), on the
   same Wi-Fi network as the phone.
 
+→ Next: [Match the client version first](#match-the-client-version-first) · [↑ Contents](#contents)
+
 ## Match the client version first
 
 WiVRn checks a protocol version on connect. If the server and the headset
@@ -38,12 +65,20 @@ So before building anything: check which WiVRn version the client app on your
 headset is, and build the server from the matching git tag. My Quest client
 was v26.9, so I built the v26.9 tag. Do not build `master` and hope.
 
+→ Next: [Step 1 - Termux packages](#step-1---termux-packages) · [↑ Contents](#contents)
+
 ## Step 1 - Termux packages
 
 Native aarch64 packages, not the glibc side:
 
 ```
 pkg install git cmake ninja clang x264 vulkan-loader vulkan-headers
+```
+
+WiVRn also uses system Boost and FreeType, so:
+
+```
+pkg install boost boost-headers freetype
 ```
 
 Then install your phone's native Turnip Vulkan driver
@@ -56,29 +91,36 @@ vulkaninfo
 If that does not list your Adreno, stop and fix Vulkan first. The server has
 nothing to encode from without it.
 
+→ Next: [Step 2 - Helper files](#step-2---helper-files) · [↑ Contents](#contents)
+
 ## Step 2 - Helper files
 
 Termux's Bionic libc and its libc++ are missing a few things WiVRn and Monado
-assume. Two small headers cover the gap; they live in this repo under
-`shims/`. Clone the repo and copy them to `~/shims`, where the build will look
-for them:
+assume. The fixes are three small compat pieces in this repo under `shims/`.
+Clone the repo and drop them in your home directory, where the build flags
+expect them:
 
 ```
 git clone https://github.com/Warlord19winter/Wivrn-on-Termux
-mkdir -p ~/shims
-cp Wivrn-on-Termux/shims/shm_compat.h ~/shims/
-cp Wivrn-on-Termux/shims/enumerate_view.h ~/shims/
+cp Wivrn-on-Termux/shims/shm_compat.h ~/
+cp Wivrn-on-Termux/shims/enumerate_compat.h ~/
+cp -r Wivrn-on-Termux/shims/malloc-compat ~/
 ```
 
 What each one is for:
 
 - `shm_compat.h` gives Bionic a `shm_open` / `shm_unlink` through
-  `memfd_create`. Bionic has no POSIX shared memory.
-- `enumerate_view.h` provides `std::ranges::enumerate_view`, which the libc++
-  shipped in Termux does not carry yet.
+  `memfd_create`. Bionic has no POSIX shared memory. Force-included for C and
+  C++.
+- `enumerate_compat.h` provides `std::ranges::enumerate_view`, which the
+  libc++ shipped in Termux does not carry yet. Force-included for C++.
+- `malloc-compat/` is an extra include directory added after the system
+  headers, covering a couple of allocator declarations Bionic does not expose.
 
-Both get force-included at configure time (Step 4), so they never need to be
-edited into the WiVRn source.
+All three are wired in through the compiler flags in Step 5, so the WiVRn
+source itself never gets edited.
+
+→ Next: [Step 3 - libudev-zero](#step-3---libudev-zero) · [↑ Contents](#contents)
 
 ## Step 3 - libudev-zero
 
@@ -94,10 +136,13 @@ make install PREFIX=$PREFIX
 cd ..
 ```
 
+→ Next: [Step 4 - Get the WiVRn source](#step-4---get-the-wivrn-source) · [↑ Contents](#contents)
+
 ## Step 4 - Get the WiVRn source
 
 Clone WiVRn and check out the tag that matches your headset's client (see
-above). Swap `v26.9` for your client's version:
+above). Monado comes in automatically as a build dependency, so there is
+nothing separate to fetch for it. Swap `v26.9` for your client's version:
 
 ```
 git clone https://github.com/WiVRn/WiVRn
@@ -105,18 +150,27 @@ cd WiVRn
 git checkout v26.9
 ```
 
+→ Next: [Step 5 - Configure](#step-5---configure) · [↑ Contents](#contents)
+
 ## Step 5 - Configure
 
-The important part is forcing a Linux build even though the compiler still
-thinks it is on Android:
+Build the server only, force a Linux build even though the compiler still
+thinks it is on Android, and wire in the shims. This is the configuration I
+actually use:
 
 ```
-cmake -S . -B build-linux -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
+cmake -S . -B build-server -G Ninja \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
   -DCMAKE_SYSTEM_NAME=Linux \
+  -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
   -DCMAKE_CXX_SCAN_FOR_MODULES=OFF \
-  -DCMAKE_C_FLAGS="-U__ANDROID__ -D__OHOS__ -include $HOME/shims/shm_compat.h" \
-  -DCMAKE_CXX_FLAGS="-U__ANDROID__ -D__OHOS__ -include $HOME/shims/shm_compat.h -include $HOME/shims/enumerate_view.h"
+  -DCMAKE_DISABLE_FIND_PACKAGE_Ceres=ON \
+  -DWIVRN_BUILD_CLIENT=OFF \
+  -DWIVRN_USE_SYSTEM_BOOST=ON \
+  -DWIVRN_USE_SYSTEM_FREETYPE=ON \
+  -DWIVRN_USE_NVENC=OFF \
+  -DCMAKE_C_FLAGS="-U__ANDROID__ -D__OHOS__ -include $HOME/shm_compat.h" \
+  -DCMAKE_CXX_FLAGS="-U__ANDROID__ -D__OHOS__ -include $HOME/shm_compat.h -idirafter $HOME/malloc-compat -include $HOME/enumerate_compat.h"
 ```
 
 Why each piece:
@@ -128,21 +182,26 @@ Why each piece:
   `__ANDROID__`. Left defined, Monado picks the Linux source files but the
   Android struct layouts, and the two do not match.
 - `-D__OHOS__` keeps Boost off the glibc `pthread_setcancelstate` path that
-  Bionic does not implement the same way.
+  Bionic does not implement the same way. The shims also look for this define.
 - `CMAKE_CXX_SCAN_FOR_MODULES=OFF` turns off C++20 module scanning, which the
   toolchain here cannot do.
+- `CMAKE_DISABLE_FIND_PACKAGE_Ceres=ON` drops Ceres, which is not needed for
+  streaming and does not build here.
+- The three `-include` / `-idirafter` entries are the shims from Step 2.
 
-Turn off what will not build: Ceres is not needed for streaming, and only the
-x264 encoder is wanted (hardware and other software encoders are not available
-under Termux). The exact option names for these move between WiVRn versions,
-so check `cmake -LAH build-linux` for the current `WIVRN_*` and encoder flags
-on the tag you checked out and disable the rest there.
+The encoder ends up as x264 (software). The hardware encoders are not
+available under Termux, and NVENC is turned off explicitly. x264 came in with
+`pkg install x264` in Step 1.
+
+→ Next: [Step 6 - Build](#step-6---build) · [↑ Contents](#contents)
 
 ## Step 6 - Build
 
 ```
-cmake --build build-linux
+cmake --build build-server
 ```
+
+→ Next: [Step 7 - Runtime setup](#step-7---runtime-setup) · [↑ Contents](#contents)
 
 ## Step 7 - Runtime setup
 
@@ -151,12 +210,14 @@ produces. Point `XR_RUNTIME_JSON` at it so clients resolve to it, and give the
 compositor a writable runtime dir:
 
 ```
-export XR_RUNTIME_JSON=$HOME/WiVRn/build-linux/openxr_wivrn-dev.json
+export XR_RUNTIME_JSON=$HOME/WiVRn/build-server/openxr_wivrn-dev.json
 export XDG_RUNTIME_DIR=$PREFIX/tmp
 ```
 
 Put both lines in your shell startup or a small launch script so every session
 has them.
+
+→ Next: [Step 8 - Run it](#step-8---run-it) · [↑ Contents](#contents)
 
 ## Step 8 - Run it
 
@@ -164,7 +225,7 @@ Start Termux:X11 and have `DISPLAY` set, then start the server. Avahi is not
 running under Termux, so service publishing is off:
 
 ```
-./build-linux/server/wivrn-server --no-publish-service
+./build-server/server/wivrn-server --no-publish-service
 ```
 
 On the headset, open the WiVRn client and connect to the phone by its IP
@@ -177,6 +238,8 @@ ip addr
 
 Once the headset is connected, launch an OpenXR app against the runtime and it
 renders on the phone, gets x264-encoded, and streams to the headset.
+
+→ Next: [Troubleshooting](#troubleshooting) · [↑ Contents](#contents)
 
 ## Troubleshooting
 
@@ -193,7 +256,11 @@ renders on the phone, gets x264-encoded, and streams to the headset.
   symbols: the shims are not being force-included, or libudev-zero is not
   installed.
 
+→ [↑ Contents](#contents)
+
 ## Credits
 
 WiVRn (https://github.com/WiVRn/WiVRn) and Monado do the real work. This is
 only what it took to get the server building and running on Termux.
+
+→ [↑ Contents](#contents)
