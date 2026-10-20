@@ -49,8 +49,7 @@ run the normal desktop WiVRn server instead.
 - Termux, from F-Droid or the GitHub releases. Not the Play Store build, it
   is too old.
 - Termux:X11. The server brings up a display and needs an X server running.
-- A headset with the WiVRn client installed (Quest, Pico, and so on), on the
-  same Wi-Fi network as the phone.
+- A headset with the WiVRn client installed on Quest 3s or other Quest headsets, on the same Wi-Fi network as the phone.
 
 → Next: [Match the client version first](#match-the-client-version-first) · [↑ Contents](#contents)
 
