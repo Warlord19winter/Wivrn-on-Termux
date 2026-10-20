@@ -45,8 +45,7 @@ run the normal desktop WiVRn server instead.
 ## What you need
 
 - A phone with an Adreno GPU and a working Turnip Vulkan driver (Snapdragon
-  8-series). Mali and other GPUs are not covered here and probably will not
-  work.
+  8-series). Mali and other GPUs are not covered here and probably work or not if anyone has a Mali phone or device please test and report.
 - Termux, from F-Droid or the GitHub releases. Not the Play Store build, it
   is too old.
 - Termux:X11. The server brings up a display and needs an X server running.
